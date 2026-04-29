@@ -59,6 +59,11 @@ def main():
     )
 
     parser.add_argument("--delta_ee", type=int, choices=[0, 1], default=0)
+    parser.add_argument(
+        "--strict_num",
+        action="store_true",
+        help="Fail if fewer than expert_data_num successful demos are available.",
+    )
 
     parser.add_argument(
         "--joint_pos_padding",
@@ -97,6 +102,8 @@ def main():
 
         # Use actual number of demos if requested number is not enough
         if len(demo_indices) < num:
+            if args.strict_num:
+                raise RuntimeError(f"Requested {num} demos but only {len(demo_indices)} available in {success_dir}.")
             print(f"Requested {num} demos but only {len(demo_indices)} available. Using all available demos.")
             num = len(demo_indices)
         else:

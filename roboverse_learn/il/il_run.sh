@@ -1,8 +1,10 @@
 #!/bin/bash
+set -e
+
 # Usage: bash roboverse_learn/il/il_run.sh --task_name_set close_box --policy_name ddpm_dit --dr_level_eval 2 --train_enable False
 
 task_name_set="close_box" # Tasks, e.g., close_box, stack_cube, pick_cube
-policy_name="ddpm_dit"    # IL policy, opts: ddpm_unet, ddpm_dit, ddim_unet, fm_unet, fm_dit, vita, act, score
+policy_name="fm_unet"    # IL policy, opts: ddpm_unet, ddpm_dit, ddim_unet, fm_unet, fm_dit, vita, act, score
 sim_set="isaacsim"          # Simulator, e.g., mujoco, isaacsim
 demo_num=100              # Number of demonstrations to collect, train, and eval
 
@@ -11,7 +13,7 @@ train_enable=True
 eval_enable=True
 
 # Training parameters
-num_epochs=100
+num_epochs=30
 seed=42
 gpu=0
 obs_space=joint_pos
@@ -76,13 +78,23 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Collect demo
-echo "=== Running collect_demo.sh ==="
-sed -i "s/^task_name_set=.*/task_name_set=$task_name_set/" ./roboverse_learn/il/collect_demo.sh
-sed -i "s/^sim_set=.*/sim_set=$sim_set/" ./roboverse_learn/il/collect_demo.sh
-sed -i "s/^num_demo_success=.*/num_demo_success=$demo_num/" ./roboverse_learn/il/collect_demo.sh
-sed -i "s/^expert_data_num=.*/expert_data_num=$demo_num/" ./roboverse_learn/il/collect_demo.sh
-sed -i "s/^random_level=.*/random_level=$dr_level_collect/" ./roboverse_learn/il/collect_demo.sh
-bash ./roboverse_learn/il/collect_demo.sh
+extra_check="obs:${obs_space}_act:${act_space}"
+if [ "${delta_ee}" = 1 ]; then
+  extra_check="${extra_check}_delta"
+fi
+zarr_path="./data_policy/${task_name_set}FrankaL${dr_level_collect}_${sim_set}_${extra_check}_${demo_num}.zarr"
+
+if [ -d "${zarr_path}" ]; then
+    echo "=== Skipping collect_demo.sh: zarr already exists at ${zarr_path} ==="
+else
+    echo "=== Running collect_demo.sh ==="
+    sed -i "s/^task_name_set=.*/task_name_set=$task_name_set/" ./roboverse_learn/il/collect_demo.sh
+    sed -i "s/^sim_set=.*/sim_set=$sim_set/" ./roboverse_learn/il/collect_demo.sh
+    sed -i "s/^num_demo_success=.*/num_demo_success=$demo_num/" ./roboverse_learn/il/collect_demo.sh
+    sed -i "s/^expert_data_num=.*/expert_data_num=$demo_num/" ./roboverse_learn/il/collect_demo.sh
+    sed -i "s/^random_level=.*/random_level=$dr_level_collect/" ./roboverse_learn/il/collect_demo.sh
+    bash ./roboverse_learn/il/collect_demo.sh
+fi
 
 # Map policy_name to model config
 config_name="default_runner"
@@ -120,7 +132,7 @@ fi
 export policy_name="${policy_name}"
 python ${main_script} --config-name=${config_name}.yaml \
 task_name=${task_name_set} \
-"dataset_config.zarr_path=./data_policy/${task_name_set}FrankaL${dr_level_collect}_${extra}_${demo_num}.zarr" \
+"dataset_config.zarr_path=./data_policy/${task_name_set}FrankaL${dr_level_collect}_${sim_set}_${extra}_${demo_num}.zarr" \
 train_config.training_params.seed=${seed} \
 train_config.training_params.num_epochs=${num_epochs} \
 train_config.training_params.device=${gpu} \

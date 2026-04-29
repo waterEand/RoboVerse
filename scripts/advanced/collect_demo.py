@@ -145,10 +145,11 @@ def get_actions(all_actions, env, demo_idxs: list[int], robot: RobotCfg):
 
     actions = []
     for env_id, (demo_idx, action_idx) in enumerate(zip(demo_idxs, action_idxs)):
-        if action_idx < len(all_actions[demo_idx]):
-            action = all_actions[demo_idx][action_idx]
+        source_idx = demo_idx % len(all_actions)
+        if action_idx < len(all_actions[source_idx]):
+            action = all_actions[source_idx][action_idx]
         else:
-            action = all_actions[demo_idx][-1]
+            action = all_actions[source_idx][-1]
 
         actions.append(action)
 
@@ -157,7 +158,10 @@ def get_actions(all_actions, env, demo_idxs: list[int], robot: RobotCfg):
 
 def get_run_out(all_actions, env, demo_idxs: list[int]) -> list[bool]:
     action_idxs = env._episode_steps
-    run_out = [action_idx >= len(all_actions[demo_idx]) for demo_idx, action_idx in zip(demo_idxs, action_idxs)]
+    run_out = [
+        action_idx >= len(all_actions[demo_idx % len(all_actions)])
+        for demo_idx, action_idx in zip(demo_idxs, action_idxs)
+    ]
     return run_out
 
 
@@ -354,12 +358,12 @@ def should_skip(log_dir: str, demo_idx: int):
             return False
         return True
 
-    if args.run_all:
-        return False
-
     if args.run_failed:
         if os.path.exists(success_path):
             return is_status_success(log_dir, demo_idx)
+        return False
+
+    if args.run_all:
         return False
 
     return True
@@ -386,15 +390,18 @@ class DemoIndexer:
     def next_idx(self):
         return self._next_idx
 
+    def refresh(self):
+        self._skip_if_should()
+
     def _skip_if_should(self):
-        while should_skip(self.save_root_dir, self._next_idx):
+        while self._next_idx < self.end_idx and should_skip(self.save_root_dir, self._next_idx):
             global global_step, tot_success, tot_give_up
             if is_status_success(self.save_root_dir, self._next_idx):
                 tot_success += 1
+                self.pbar.update(1)
             else:
                 tot_give_up += 1
             self.pbar.set_description(f"Frame {global_step} Success {tot_success} Giveup {tot_give_up}")
-            self.pbar.update(1)
             log.info(f"Demo {self._next_idx} already exists, skipping...")
             self._next_idx += 1
 
@@ -502,7 +509,7 @@ def main():
     ########################################################
     ## Main
     ########################################################
-    max_demo = n_demo
+    max_demo = args.demo_start_idx + max(n_demo, args.num_demo_success * 10)
     try_num = args.retry_num + 1
 
     ## Demo collection state machine:
@@ -522,6 +529,9 @@ def main():
     finished = [False] * env.handler.num_envs
     TaskName = args.task
 
+    def source_idx(demo_idx: int) -> int:
+        return demo_idx % n_demo
+
     if args.cust_name is not None:
         additional_str = f"-{args.cust_name}"
     else:
@@ -540,19 +550,27 @@ def main():
     )
     demo_idxs = []
     for demo_idx in range(env.handler.num_envs):
+        if demo_indexer.next_idx >= max_demo:
+            break
         demo_idxs.append(demo_indexer.next_idx)
         demo_indexer.move_on()
     log.info(f"Initialize with demo idxs: {demo_idxs}")
 
+    if not demo_idxs:
+        log.info(f"No demos left to collect. Current successes: {tot_success}/{args.num_demo_success}.")
+        collector.final()
+        env.close()
+        return
+
     ## Apply initial randomization (create scene and update positions)
     for env_id, demo_idx in enumerate(demo_idxs):
         randomization_manager.apply_randomization(demo_idx, is_initial=True)
-        randomization_manager.update_positions_to_table(demo_idx, env_id)
+        randomization_manager.update_positions_to_table(source_idx(demo_idx), env_id)
         randomization_manager.update_camera_look_at(env_id)
         randomization_manager.apply_camera_randomization()  # Apply camera randomization after baseline adjustment
 
     ## Reset to initial states (after position adjustment)
-    obs, extras = env.reset(states=[init_states[demo_idx] for demo_idx in demo_idxs])
+    obs, extras = env.reset(states=[init_states[source_idx(demo_idx)] for demo_idx in demo_idxs])
 
     ## Wait for environment to stabilize after reset
     ensure_clean_state(env.handler)
@@ -574,17 +592,15 @@ def main():
     stop_flag = False
 
     while not all(finished):
-        if stop_flag:
-            pass
-
         if tot_success >= args.num_demo_success:
             log.info(f"Reached target number of successful demos ({args.num_demo_success}).")
             stop_flag = True
-
-        if demo_indexer.next_idx >= max_demo:
+        elif demo_indexer.next_idx >= max_demo:
             if not stop_flag:
                 log.warning(f"Reached maximum demo index ({max_demo}), finishing in-flight demos.")
             stop_flag = True
+        else:
+            stop_flag = False
 
         pbar.set_description(f"Frame {global_step} Success {tot_success} Giveup {tot_give_up}")
         actions = get_actions(all_actions, env, demo_idxs, robot)
@@ -623,10 +639,10 @@ def main():
                     log.info(f"Transitioning Env {env_id}: Demo {demo_idx} to Demo {new_demo_idx}")
 
                     randomization_manager.apply_randomization(new_demo_idx, is_initial=False)
-                    randomization_manager.update_positions_to_table(new_demo_idx, env_id)
+                    randomization_manager.update_positions_to_table(source_idx(new_demo_idx), env_id)
                     randomization_manager.update_camera_look_at(env_id)
                     randomization_manager.apply_camera_randomization()  # Apply camera randomization
-                    force_reset_to_state(env, init_states[new_demo_idx], env_id)
+                    force_reset_to_state(env, init_states[source_idx(new_demo_idx)], env_id)
 
                     obs = env.handler.get_states()
                     obs = state_tensor_to_nested(env.handler, obs)
@@ -649,10 +665,10 @@ def main():
             if failure_count[env_id] < try_num:
                 log.info(f"Demo {demo_idx} failed {failure_count[env_id]} times, retrying...")
                 randomization_manager.apply_randomization(demo_idx, is_initial=False)
-                randomization_manager.update_positions_to_table(demo_idx, env_id)
+                randomization_manager.update_positions_to_table(source_idx(demo_idx), env_id)
                 randomization_manager.update_camera_look_at(env_id)
                 randomization_manager.apply_camera_randomization()  # Apply camera randomization
-                force_reset_to_state(env, init_states[demo_idx], env_id)
+                force_reset_to_state(env, init_states[source_idx(demo_idx)], env_id)
 
                 obs = env.handler.get_states()
                 obs = state_tensor_to_nested(env.handler, obs)
@@ -663,15 +679,16 @@ def main():
                 tot_give_up += 1
                 # pbar.update(1)
                 pbar.set_description(f"Frame {global_step} Success {tot_success} Giveup {tot_give_up}")
+                demo_indexer.refresh()
 
                 if demo_indexer.next_idx < max_demo:
                     new_demo_idx = demo_indexer.next_idx
                     demo_idxs[env_id] = new_demo_idx
                     randomization_manager.apply_randomization(new_demo_idx, is_initial=False)
-                    randomization_manager.update_positions_to_table(new_demo_idx, env_id)
+                    randomization_manager.update_positions_to_table(source_idx(new_demo_idx), env_id)
                     randomization_manager.update_camera_look_at(env_id)
                     randomization_manager.apply_camera_randomization()  # Apply camera randomization
-                    force_reset_to_state(env, init_states[new_demo_idx], env_id)
+                    force_reset_to_state(env, init_states[source_idx(new_demo_idx)], env_id)
 
                     obs = env.handler.get_states()
                     obs = state_tensor_to_nested(env.handler, obs)

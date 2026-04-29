@@ -593,7 +593,7 @@ class DefaultRunner(BaseRunner):
             print(policyRunner.policy_cfg)
 
             while step < MaxStep:
-                log.debug(f"Step {step}")
+                # log.debug(f"Step {step}")
 
                 new_obs = {
                     "rgb": obs.cameras["camera0"].rgb,
