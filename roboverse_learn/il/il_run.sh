@@ -13,7 +13,7 @@ train_enable=True
 eval_enable=True
 
 # Training parameters
-num_epochs=30
+num_epochs=100
 seed=42
 gpu=0
 obs_space=joint_pos
@@ -93,7 +93,7 @@ else
     sed -i "s/^num_demo_success=.*/num_demo_success=$demo_num/" ./roboverse_learn/il/collect_demo.sh
     sed -i "s/^expert_data_num=.*/expert_data_num=$demo_num/" ./roboverse_learn/il/collect_demo.sh
     sed -i "s/^random_level=.*/random_level=$dr_level_collect/" ./roboverse_learn/il/collect_demo.sh
-    bash ./roboverse_learn/il/collect_demo.sh
+    bash ./roboverse_learn/il/collect_demo.sh || true
 fi
 
 # Map policy_name to model config

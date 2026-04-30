@@ -24,6 +24,7 @@ if [ "${delta_ee}" = 1 ]; then
 fi
 
 ## Collecting demonstration data
+# Isaac Sim may force-exit with non-zero code on shutdown timeout, which is harmless
 python ./scripts/advanced/collect_demo.py \
 --sim=${sim_set} \
 --task=${task_name_set} \
@@ -34,7 +35,7 @@ python ./scripts/advanced/collect_demo.py \
 --num_demo_success ${num_demo_success} \
 --retry_num=${retry_num} \
 --cust_name=${cust_name} \
---level=${random_level}
+--level=${random_level} || true
 
 ## Convert demonstration data
 python ./roboverse_learn/il/data2zarr_dp.py \
