@@ -60,7 +60,13 @@ class IsaacsimHandler(BaseSimHandler):
         self._robot_init_quat = {robot.name: robot.default_orientation for robot in self.robots}
         self._cameras = scenario_cfg.cameras
 
-        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # When CUDA_VISIBLE_DEVICES is set (e.g. to "2"), the CUDA driver remaps
+        # that physical GPU to device index 0. Use 0 so all code is consistent.
+        if os.environ.get("CUDA_VISIBLE_DEVICES") is not None:
+            _gpu_id = 0
+        else:
+            _gpu_id = int(os.environ.get("ISAACSIM_GPU", "0"))
+        self._device = torch.device(f"cuda:{_gpu_id}" if torch.cuda.is_available() else "cpu")
         self._num_envs: int = scenario_cfg.num_envs
         self._episode_length_buf = [0 for _ in range(self.num_envs)]
 
@@ -92,9 +98,19 @@ class IsaacsimHandler(BaseSimHandler):
         if simulation_app is None:
             from isaaclab.app import AppLauncher
 
+            # CUDA_VISIBLE_DEVICES must remain set when the Python process starts so
+            # the CUDA driver (read once at first cuInit across ALL threads, including
+            # C++ extension threads for Warp/PhysX) sees the correct physical GPU.
+            # torch.cuda.set_device() is thread-local and cannot affect those threads.
+            # When CUDA_VISIBLE_DEVICES="N", physical GPU N is remapped to device 0.
+            if os.environ.get("CUDA_VISIBLE_DEVICES") is not None:
+                gpu_id = 0  # CUDA_VISIBLE_DEVICES already constrains to the right GPU
+            else:
+                gpu_id = int(os.environ.get("ISAACSIM_GPU", "0"))
+            torch.cuda.set_device(gpu_id)
             parser = argparse.ArgumentParser()
             AppLauncher.add_app_launcher_args(parser)
-            args = parser.parse_args([])
+            args = parser.parse_args(["--device", f"cuda:{gpu_id}"])
             args.enable_cameras = True
             args.headless = self.headless
             app_launcher = AppLauncher(args)
@@ -109,7 +125,7 @@ class IsaacsimHandler(BaseSimHandler):
         from isaaclab.sim import PhysxCfg, SimulationCfg, SimulationContext
 
         sim_config: SimulationCfg = SimulationCfg(
-            device="cuda:0",
+            device=f"cuda:{gpu_id}",
             render_interval=self.scenario.decimation,  # TODO divide into render interval and control decimation
             physx=PhysxCfg(
                 bounce_threshold_velocity=self.scenario.sim_params.bounce_threshold_velocity,

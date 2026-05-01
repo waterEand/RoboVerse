@@ -17,8 +17,6 @@ from metasim.scenario.scenario import ScenarioCfg, SimParamCfg
 from metasim.task.registry import register_task
 from roboverse_pack.tasks.pick_place.base import DEFAULT_CONFIG, PickPlaceBase
 
-from .functions import *
-
 
 @register_task("pick_place.approach_grasp_hu", "pick_place_approach_grasp_hu")
 class PickPlaceApproachGraspHu(PickPlaceBase):

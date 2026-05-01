@@ -1,8 +1,6 @@
 ## run nvidia-smi to check available GPUs
 set -e
 
-export CUDA_VISIBLE_DEVICES=0
-
 ## Parameters
 task_name_set=stack_cube
 random_level=0

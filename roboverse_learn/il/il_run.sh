@@ -15,7 +15,7 @@ eval_enable=True
 # Training parameters
 num_epochs=100
 seed=42
-gpu=0
+gpu=2
 obs_space=joint_pos
 act_space=joint_pos
 delta_ee=0
@@ -77,6 +77,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# CUDA_VISIBLE_DEVICES restricts the CUDA driver to one physical GPU at process
+# start — the only mechanism that affects C++ extension threads (Warp, PhysX)
+# which initialize before Python code can call torch.cuda.set_device().
+# With this set to "${gpu}", physical GPU ${gpu} appears as CUDA device 0,
+# so all device indices below (training, eval, Isaac Sim) must use 0.
+export CUDA_VISIBLE_DEVICES="${gpu}"
+
 # Collect demo
 extra_check="obs:${obs_space}_act:${act_space}"
 if [ "${delta_ee}" = 1 ]; then
@@ -130,12 +137,14 @@ if [ "${delta_ee}" = 1 ]; then
 fi
 
 export policy_name="${policy_name}"
+# With CUDA_VISIBLE_DEVICES="${gpu}", physical GPU ${gpu} is CUDA device 0.
+# Pass device=cuda:0 so PyTorch training also lands on the right GPU.
 python ${main_script} --config-name=${config_name}.yaml \
 task_name=${task_name_set} \
 "dataset_config.zarr_path=./data_policy/${task_name_set}FrankaL${dr_level_collect}_${sim_set}_${extra}_${demo_num}.zarr" \
 train_config.training_params.seed=${seed} \
 train_config.training_params.num_epochs=${num_epochs} \
-train_config.training_params.device=${gpu} \
+train_config.training_params.device=cuda:0 \
 eval_config.policy_runner.obs.obs_type=${obs_space} \
 eval_config.policy_runner.action.action_type=${act_space} \
 eval_config.policy_runner.action.delta=${delta_ee} \
