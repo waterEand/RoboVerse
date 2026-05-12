@@ -229,10 +229,12 @@ class SimpleFlowNet(nn.Module):
         mlp_ratio=4.0,
         dropout=0.0,
         time_embed_dim=256,
+        condition_dim=None,  # Optional: dimension of condition (e.g., obs_latents)
     ):
         super().__init__()
 
         self.hidden_dim = hidden_dim
+        self.condition_dim = condition_dim
         self.input_proj = nn.Linear(input_dim, hidden_dim)
         self.time_embed = nn.Sequential(
             SinusoidalPosEmb(time_embed_dim),
@@ -240,6 +242,12 @@ class SimpleFlowNet(nn.Module):
             nn.Mish(),
             nn.Linear(time_embed_dim * 4, hidden_dim),
         )
+        
+        # Condition embedding (optional)
+        if condition_dim is not None:
+            self.cond_embed = nn.Linear(condition_dim, hidden_dim)
+        else:
+            self.cond_embed = None
 
         self.layers = nn.ModuleList([
             FlowNetLayer(
@@ -267,9 +275,14 @@ class SimpleFlowNet(nn.Module):
         nn.init.normal_(self.time_embed[1].weight, std=0.02)
         nn.init.normal_(self.time_embed[3].weight, std=0.02)
 
-    def forward(self, x, t):
+    def forward(self, x, t, global_cond=None):
         x = self.input_proj(x)
         t = self.time_embed(t)
+        
+        # Add condition to time embedding if provided
+        if global_cond is not None and self.cond_embed is not None:
+            c = self.cond_embed(global_cond)
+            t = t + c  # Inject condition into modulation signal
 
         for block in self.layers:
             x = block(x, t)

@@ -2,7 +2,7 @@
 set -e
 
 ## Parameters
-task_name_set=stack_cube
+task_name_set=close_box
 random_level=0
 num_envs=1              # Number of parallel environments
 demo_start_idx=0        # Index of the first demo to collect

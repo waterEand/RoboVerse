@@ -1,0 +1,62 @@
+# CBF: CVAE-Bootstrapped Flow Matching
+# Phase 1: train CVAE (posterior + learned prior + decoder)
+# Phase 2: flow matching from prior to posterior + joint CVAE fine-tune
+
+_target_: roboverse_learn.il.policies.cbf.cbf_policy.CBFImagePolicy
+
+shape_meta: ${shape_meta}
+
+obs_encoder:
+  _target_: roboverse_learn.il.utils.vision.multi_image_obs_encoder.MultiImageObsEncoder
+  shape_meta: ${shape_meta}
+  rgb_model:
+    _target_: roboverse_learn.il.utils.vision.model_getter.get_resnet
+    name: resnet18
+    weights: null
+  resize_shape: null
+  crop_shape: null
+  random_crop: True
+  use_group_norm: True
+  share_rgb_model: False
+  imagenet_norm: True
+
+horizon: ${horizon}
+n_action_steps: ${eval:'${n_action_steps}+${n_latency_steps}'}
+n_obs_steps: ${n_obs_steps}
+
+# Latent dimension (shared across CVAE and flow net)
+latent_dim: 512
+
+# Phase control
+# phase1_steps ≈ phase1_epochs * (dataset_size / batch_size)
+# default 100 epoch run, ~330 steps/epoch → 10000 ≈ 30 epochs of Phase 1
+phase1_steps: 10000
+
+# CVAE architecture
+cvae_hidden_dim: 512
+cvae_num_layers: 4
+prior_hidden_dim: 256
+prior_num_layers: 3
+decoder_hidden_dim: 512
+decoder_num_layers: 4
+
+# Loss weights
+kl_beta: 1.0e-3          # max KL weight after warm-up
+beta_warmup_steps: 5000  # linear warm-up steps for KL weight
+free_bits: 0.1           # nats/dim floor — prevents posterior collapse
+recon_weight: 1.0
+joint_cvae_weight: 0.1   # CVAE loss weight during Phase 2
+flow_recon_weight: 0.0   # set >0 to decode flow endpoint during training (expensive)
+
+# Flow matcher
+flow_matcher:
+  _target_: roboverse_learn.il.utils.flow.flow_matchers.ConditionalFlowMatcher
+  sigma: 0.0
+  num_sampling_steps: 6
+
+# Flow network (SimpleFlowNet, obs-conditioned MLP with AdaLN)
+flow_net:
+  hidden_dim: 512
+  num_layers: 4
+  mlp_ratio: 4
+  dropout: 0.0

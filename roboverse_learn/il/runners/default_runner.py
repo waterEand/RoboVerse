@@ -343,6 +343,13 @@ class DefaultRunner(BaseRunner):
 
                         result = policy.predict_action(obs_dict)
                         pred_action = result["action_pred"]
+                        pred_len = pred_action.shape[1]
+                        gt_len = gt_action.shape[1]
+                        if pred_len != gt_len:
+                            # For action-to-action flow: pred is future actions starting from n_obs_steps-1
+                            n_obs_steps = gt_len - pred_len + 1
+                            start_idx = n_obs_steps - 1
+                            gt_action = gt_action[:, start_idx:start_idx + pred_len, :]
                         mse = torch.nn.functional.mse_loss(pred_action, gt_action)
                         step_log["train_action_mse_error"] = mse.item()
                         del batch
@@ -378,7 +385,13 @@ class DefaultRunner(BaseRunner):
         args = self.eval_args
 
         num_envs: int = args.num_envs
-        log.info(f"Using GPU device: {args.gpu_id}")
+        _cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+        if _cuda_visible is not None:
+            log.info(
+                f"Using CUDA device {args.gpu_id} (= physical GPU {_cuda_visible} via CUDA_VISIBLE_DEVICES)"
+            )
+        else:
+            log.info(f"Using GPU device: {args.gpu_id}")
         task_cls = get_task_class(args.task)
 
         # Camera configuration
@@ -660,8 +673,7 @@ class DefaultRunner(BaseRunner):
     ):
         train = self.cfg.train_enable
         eval = self.cfg.eval_enable
-        if not train:
-            ckpt_path = self.cfg.eval_path
+        ckpt_path = self.cfg.eval_path if self.cfg.eval_path else self.get_checkpoint_path()
         if train:
             self.train()
         if eval:

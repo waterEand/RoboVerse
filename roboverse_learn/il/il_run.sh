@@ -125,7 +125,7 @@ fi
 # Run training/evaluation for DP/FM/VITA policies
 echo "=== Running ${policy_name} ==="
 
-eval_ckpt_name=$demo_num
+eval_ckpt_name=$num_epochs
 output_dir="./il_outputs/${policy_name}"
 eval_path="${output_dir}/${task_name_set}/checkpoints/${eval_ckpt_name}.ckpt"
 
